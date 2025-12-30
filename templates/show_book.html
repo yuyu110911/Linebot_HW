@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>動物園演出預約</title>
+
+  <!-- ✅ LIFF SDK：一定要有 -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    body { font-family: Arial, "Microsoft JhengHei", sans-serif; padding: 16px; }
+    .box { max-width: 520px; margin: 0 auto; border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    label { display:block; margin-top: 12px; font-weight: 700; }
+    select, input { width: 100%; padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #ccc; }
+    button { width: 100%; padding: 12px; margin-top: 16px; border: 0; border-radius: 10px; cursor: pointer; font-size: 16px; }
+    #btnSend { background: #06C755; color: #fff; }
+    #btnSend:disabled { background:#9bd8b2; cursor:not-allowed; }
+    .hint { margin-top: 10px; color:#555; font-size: 14px; white-space: pre-line; }
+    .err { color: #c00; margin-top: 10px; white-space: pre-line; }
+    .ok { color: #090; margin-top: 10px; white-space: pre-line; }
+    code { background:#f6f6f6; padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+
+<body>
+  <div class="box">
+    <h2>🐾 動物園演出預約</h2>
+
+    <div class="hint" id="envHint">初始化中...</div>
+
+    <label>選擇演出</label>
+    <select id="showSelect"></select>
+
+    <label>選擇日期</label>
+    <input type="date" id="dateInput" />
+
+    <label>選擇時段</label>
+    <select id="timeSelect"></select>
+
+    <button id="btnSend" disabled>✅ 送出預約</button>
+
+    <div class="err" id="errBox"></div>
+    <div class="ok" id="okBox"></div>
+  </div>
+
+  <script>
+    // 從 Flask 傳進來
+    const LIFF_ID = "{{ liffid }}";
+
+    // SHOWS 直接由後端字典轉成 JSON
+    const SHOWS = {{ shows | tojson }};
+    const PRE_SHOW = "{{ pre_show }}";
+
+    const showSelect = document.getElementById("showSelect");
+    const dateInput  = document.getElementById("dateInput");
+    const timeSelect = document.getElementById("timeSelect");
+    const btnSend    = document.getElementById("btnSend");
+    const errBox     = document.getElementById("errBox");
+    const okBox      = document.getElementById("okBox");
+    const envHint    = document.getElementById("envHint");
+
+    function setError(msg){
+      errBox.textContent = msg || "";
+      okBox.textContent = "";
+      console.log("[ERROR]", msg);
+    }
+    function setOK(msg){
+      okBox.textContent = msg || "";
+      errBox.textContent = "";
+      console.log("[OK]", msg);
+    }
+
+    // 讓日期最小值=今天
+    function todayISO(){
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 依演出更新時段
+    function renderTimes(showName){
+      timeSelect.innerHTML = "";
+      const times = (SHOWS[showName] && SHOWS[showName].times) ? SHOWS[showName].times : [];
+      times.forEach(t => {
+        const opt = document.createElement("option");
+        opt.value = t;
+        opt.textContent = t;
+        timeSelect.appendChild(opt);
+      });
+    }
+
+    function validate(){
+      const showName = showSelect.value;
+      const dateVal = dateInput.value;
+      const timeVal = timeSelect.value;
+      btnSend.disabled = !(showName && dateVal && timeVal);
+    }
+
+    // 送出預約：回傳給 Bot 的文字訊息
+    async function sendBooking(){
+      setError("");
+
+      const showName = showSelect.value;
+      const dateVal = dateInput.value;
+      const timeVal = timeSelect.value;
+
+      if(!showName || !dateVal || !timeVal){
+        setError("請先選擇：演出 / 日期 / 時段");
+        return;
+      }
+
+      // ✅ 你後端 Python 會吃這個格式
+      const msgText = `###BOOK/${showName}/${dateVal}/${timeVal}`;
+
+      try{
+        if(!liff.isInClient()){
+          // 用外部瀏覽器開 LIFF 會到這裡
+          setError("你現在不是在 LINE App 內開啟。\n請從 LINE 對話點『預約演出』按鈕進來，才能送出。");
+          return;
+        }
+
+        await liff.sendMessages([{ type:"text", text: msgText }]);
+        setOK("已送出預約 ✅\n你可以關閉視窗回到聊天室。");
+
+        // 送出後關閉（你也可以註解掉）
+        liff.closeWindow();
+      }catch(e){
+        setError("送出失敗，原因如下：\n" + (e && e.message ? e.message : String(e)));
+      }
+    }
+
+    async function init(){
+      try{
+        // 先把演出塞進下拉
+        Object.keys(SHOWS).forEach(name => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          showSelect.appendChild(opt);
+        });
+
+        // 預選演出（如果 URL 有帶 ?show=xxx）
+        if(PRE_SHOW && SHOWS[PRE_SHOW]){
+          showSelect.value = PRE_SHOW;
+        }
+
+        dateInput.min = todayISO();
+        dateInput.value = todayISO();
+
+        renderTimes(showSelect.value);
+        validate();
+
+        // ✅ 初始化 LIFF
+        await liff.init({ liffId: LIFF_ID });
+
+        envHint.textContent =
+          `LIFF 初始化成功\nisInClient=${liff.isInClient()}\nos=${liff.getOS()}\nlang=${liff.getLanguage()}`;
+
+      }catch(e){
+        setError("LIFF 初始化失敗：\n" + (e && e.message ? e.message : String(e)));
+        envHint.textContent = "初始化失敗";
+      }
+    }
+
+    showSelect.addEventListener("change", () => { renderTimes(showSelect.value); validate(); });
+    dateInput.addEventListener("change", validate);
+    timeSelect.addEventListener("change", validate);
+    btnSend.addEventListener("click", sendBooking);
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>取消預約</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    body { font-family: Arial, "Microsoft JhengHei", sans-serif; padding: 16px; }
+    .card { max-width: 640px; margin: 0 auto; border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    .row { display:flex; gap:10px; align-items:center; padding: 10px; border-bottom: 1px solid #eee; }
+    .row:last-child { border-bottom: 0; }
+    button { width: 100%; padding: 12px; margin-top: 16px; border: 0; border-radius: 12px; cursor: pointer; font-size: 16px; }
+    .primary { background: #e53935; color: #fff; }
+    .muted { color: #666; font-size: 13px; margin-top: 8px; }
+    .danger { color: #b00020; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>取消預約</h2>
+    <div id="status" class="muted">初始化中…</div>
+    <div id="list"></div>
+
+    <button class="primary" id="btnCancel">送出取消</button>
+    <div class="muted danger" id="errText"></div>
+  </div>
+
+<script>
+  const LIFF_ID = "{{ liffid }}";
+
+  async function loadBookings(uid) {
+    const res = await fetch(`/api/bookings?uid=${encodeURIComponent(uid)}`, {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+    return await res.json();
+  }
+
+  function renderBookings(items) {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+
+    if (!items || items.length === 0) {
+      list.innerHTML = `<div class="muted">你目前沒有任何預約。</div>`;
+      return;
+    }
+
+    items.forEach(it => {
+      const div = document.createElement("div");
+      div.className = "row";
+      div.innerHTML = `
+        <input type="checkbox" class="ck" value="${it.id}" />
+        <div>
+          <div><b>${it.show_name}</b></div>
+          <div class="muted">${it.show_date} ${it.show_time}</div>
+        </div>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  async function main() {
+    const status = document.getElementById("status");
+    const errText = document.getElementById("errText");
+    errText.textContent = "";
+
+    try {
+      await liff.init({ liffId: LIFF_ID });
+      status.textContent = "LIFF 初始化完成 ✅";
+
+      if (!liff.isLoggedIn()) {
+        liff.login();
+        return;
+      }
+
+      const profile = await liff.getProfile();
+      const uid = profile.userId;
+
+      const data = await loadBookings(uid);
+      if (!data.ok) throw new Error("api_bookings failed");
+      renderBookings(data.data);
+
+      document.getElementById("btnCancel").addEventListener("click", async () => {
+        errText.textContent = "";
+
+        const cks = Array.from(document.querySelectorAll(".ck:checked"));
+        if (cks.length === 0) {
+          errText.textContent = "請先勾選要取消的預約（可多選）";
+          return;
+        }
+        const ids = cks.map(x => x.value).join(",");
+        const payload = `###CANCEL/${ids}`;
+
+        await liff.sendMessages([{ type: "text", text: payload }]);
+        liff.closeWindow();
+      });
+
+    } catch (e) {
+      console.error(e);
+      status.textContent = "LIFF 初始化失敗 ❌";
+      errText.textContent = "請確認 LIFF 設定與 https 網址是否正確";
+    }
+  }
+
+  main();
+</script>
+</body>
+</html>
